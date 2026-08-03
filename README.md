@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 # exploradora
 
 **STATUS: pre-alpha — repository bootstrap in progress. Nothing is implemented
