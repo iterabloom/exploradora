@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# ------------------------------------------------------------------
+# CI Debug Helper - Fetch and analyze Forgejo/Gitea Actions run logs
+#
+# Works with any Forgejo/Gitea/Codeberg instance. Detects the API
+# base URL from git remote origin automatically.
+#
+# Required environment variable:
+#   FORGEJO_TOKEN - API token for authentication
+#
+# Configuration via .env file or environment:
+#   FORGEJO_API_BASE - Override auto-detected API URL (optional)
+# ------------------------------------------------------------------
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=lib/forgejo-api.sh
+source "$SCRIPT_DIR/lib/forgejo-api.sh"
+
+load_env
+detect_api_base
+
+TOKEN="${FORGEJO_TOKEN:-}"
+if [[ -z "$TOKEN" ]]; then
+  echo "Error: FORGEJO_TOKEN not set. Source .env or set FORGEJO_TOKEN."
+  exit 1
+fi
+
+usage() {
+  echo "Usage: $0 [command]"
+  echo ""
+  echo "Commands:"
+  echo "  runs              List recent workflow runs (default)"
+  echo "  status [sha]      Get status for a specific commit (default: HEAD)"
+  echo "  pr-status <num>   Show PR state, merged status, HEAD SHA"
+  echo "  logs [job] [sha]  Fetch log for a CI job (default: first failed job at HEAD)"
+  echo "  analyze-deps      Check tree-sitter packages vs pyproject.toml"
+  echo ""
+  echo "Examples:"
+  echo "  $0 runs              # Show last 10 runs"
+  echo "  $0 status            # Show status for current commit"
+  echo "  $0 pr-status 42      # Show PR #42 details"
+  echo "  $0 logs              # Fetch log for first failed job at HEAD"
+  echo "  $0 logs pytest       # Fetch log for 'pytest' job at HEAD"
+  echo "  $0 logs pytest abc123  # Fetch log for 'pytest' job at specific commit"
+  echo "  $0 analyze-deps      # Find missing tree-sitter dependencies"
+}
+
+# GitHub arm: GitHub Actions is disabled under Woodpecker CI, so /actions/runs
+# returns an empty workflow_runs (HTTP 200) — there is no run history to list.
+# The only agent-readable CI signal is the Woodpecker commit-STATUS, so render
+# HEAD's status entries as pseudo-runs. (status/pr-status read the same endpoint
+# and are already shape-compatible.)
+_cmd_runs_github() {
+  local sha
+  sha=$(git rev-parse HEAD)
+  if ! api_get "$API_BASE/commits/$sha/status"; then
+    echo "❌ Failed to fetch commit status (HTTP $API_HTTP_CODE)"
+    exit 1
+  fi
+  CI_DEBUG_SHA="$sha" python3 -c "
+import sys, json, os
+short = os.environ.get('CI_DEBUG_SHA', '')[:8]
+try:
+    data = json.load(sys.stdin)
+    statuses = data.get('statuses') or []
+    if not statuses:
+        print('No CI status reported for this commit yet.')
+        sys.exit(0)
+    for s in statuses:
+        st = s.get('state', s.get('status', '?'))
+        ctx = s.get('context', 'N/A')
+        marker = '✅' if st == 'success' else '❌' if st in ('failure', 'error') else '⏳'
+        print(f'{marker} {st:10} {ctx:30} @ {short}')
+except (json.JSONDecodeError, KeyError, TypeError) as e:
+    print(f'Error parsing response: {e}')
+" <<< "$API_RESPONSE"
+}
+
+cmd_runs() {
+  echo "Recent CI runs for $REPO_SLUG:"
+  echo "---"
+
+  if [[ "${FORGE_BACKEND:-forgejo}" == "github" ]]; then
+    _cmd_runs_github
+    return
+  fi
+
+  # Try /actions/runs (Codeberg / Forgejo 12+), fall back to /actions/tasks
+  # (Forgejo 11.x / gitea-1.22 which lacks the runs endpoint).
+  local got_runs=false
+  if api_get "$API_BASE/actions/runs?limit=300"; then
+    got_runs=true
+  elif api_get "$API_BASE/actions/tasks?limit=100"; then
+    got_runs=true
+  else
+    echo "❌ Failed to fetch runs (HTTP $API_HTTP_CODE)"
+    print_desync_recovery_hint
+    exit 1
+  fi
+
+  echo "$API_RESPONSE" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    # Coerce explicit null to []. Forgejo's runs/tasks endpoints can return
+    # 'workflow_runs': null when no runs exist; dict.get's default only fires
+    # for missing keys, not for keys with a null value.
+    runs = data.get('workflow_runs') or []
+    # Deduplicate by run_number (tasks endpoint returns one entry per job)
+    seen = set()
+    unique = []
+    for r in runs:
+        key = r.get('run_number', r.get('id'))
+        if key not in seen:
+            seen.add(key)
+            unique.append(r)
+    for r in unique[-15:]:
+        sha = r.get('head_sha', r.get('commit_sha', ''))[:8]
+        status = r.get('status', '?')
+        name = r.get('display_title', r.get('name', 'N/A'))[:20]
+        run_num = r.get('run_number', r.get('id', '?'))
+        marker = '✅' if status == 'success' else '❌' if status == 'failure' else '⏳'
+        print(f'{marker} #{run_num}: {status:10} {name:20} @ {sha}')
+except (json.JSONDecodeError, KeyError, TypeError) as e:
+    print(f'Error parsing response: {e}')
+"
+}
+
+cmd_status() {
+  local sha="${1:-$(git rev-parse HEAD)}"
+  local short_sha="${sha:0:8}"
+  echo "CI status for commit $short_sha:"
+
+  if ! api_get "$API_BASE/commits/$sha/status"; then
+    echo "❌ Failed to fetch status (HTTP $API_HTTP_CODE)"
+    print_desync_recovery_hint
+    exit 1
+  fi
+
+  echo "$API_RESPONSE" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    state = data.get('state', 'unknown')
+    # Coerce explicit null to []. Forgejo returns 'statuses': null (with
+    # total_count: 0 and state: '') for SHAs that have no commit-status
+    # entries yet — e.g. a freshly pushed PR head where CI hasn't reported
+    # anything. dict.get's default only fires for missing keys.
+    statuses = data.get('statuses') or []
+
+    if not statuses:
+        print('No CI status reported for this commit yet.')
+        sys.exit(0)
+
+    # Check if ci-complete passed despite overall failure.
+    # When pytest-retry recovers a flaky test, individual jobs may show
+    # 'failure' but ci-complete (the gating job) shows 'success'.
+    ci_complete = next(
+        (s for s in statuses if s.get('context', '') == 'ci-complete'),
+        None,
+    )
+    if state == 'failure' and ci_complete and ci_complete.get('state') == 'success':
+        state = 'success (recovered)'
+
+    print(f'Overall: {state}')
+    if statuses:
+        print('Jobs:')
+        for s in statuses:
+            ctx = s.get('context', 'unknown')
+            st = s.get('state', s.get('status', 'unknown'))
+            marker = '✅' if st == 'success' else '❌' if st in ['failure', 'error'] else '⏳'
+            print(f'  {marker} {ctx}: {st}')
+except (json.JSONDecodeError, KeyError, TypeError) as e:
+    print(f'Error parsing response: {e}')
+"
+}
+
+cmd_pr_status() {
+  local pr_num="${1:-}"
+  if [[ -z "$pr_num" ]]; then
+    echo "Error: PR number is required"
+    echo "Usage: $0 pr-status <number>"
+    exit 1
+  fi
+
+  echo "PR #$pr_num status:"
+
+  if ! api_get "$API_BASE/pulls/$pr_num"; then
+    echo "❌ Failed to fetch PR #$pr_num (HTTP $API_HTTP_CODE)"
+    exit 1
+  fi
+
+  local state merged title head_sha head_branch base_branch mergeable
+  state=$(echo "$API_RESPONSE" | json_field "state")
+  merged=$(echo "$API_RESPONSE" | json_field "merged")
+  title=$(echo "$API_RESPONSE" | json_field "title")
+  head_sha=$(echo "$API_RESPONSE" | json_field "head.sha")
+  head_branch=$(echo "$API_RESPONSE" | json_field "head.ref")
+  base_branch=$(echo "$API_RESPONSE" | json_field "base.ref")
+  # Tri-state on purpose (INV-rahib Surface 1). auto-pr's Scenario B gate
+  # branches on this field, and GitHub reports it as null while mergeability
+  # is still being computed — so "null" and "false" being separately visible
+  # here is the whole point. Without it the gate's live input was
+  # unobservable through any approved script, which is why the defect went
+  # unverified against the real backend for as long as it did.
+  mergeable=$(echo "$API_RESPONSE" | json_bool_state "mergeable")
+
+  echo "  Title:     $title"
+  echo "  State:     $state"
+  echo "  Merged:    $merged"
+  echo "  Mergeable: $mergeable"
+  echo "  Branch:    $head_branch → $base_branch"
+  echo "  HEAD:      ${head_sha:0:12}"
+
+  # Also show CI status for the PR's head commit
+  if [[ -n "$head_sha" ]]; then
+    echo ""
+    echo "CI status for HEAD ($head_sha):"
+    if api_get "$API_BASE/commits/$head_sha/status"; then
+      local ci_state ci_complete_state
+      ci_state=$(echo "$API_RESPONSE" | json_field "state")
+      # Check if ci-complete passed despite overall failure (retry recovery)
+      ci_complete_state=$(echo "$API_RESPONSE" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+# Coerce explicit null to []; see cmd_status for the same defensive pattern.
+for s in (data.get('statuses') or []):
+    if s.get('context', '') == 'ci-complete':
+        print(s.get('state', ''))
+        break
+" 2>/dev/null)
+      if [[ "$ci_state" == "failure" && "$ci_complete_state" == "success" ]]; then
+        ci_state="success (recovered)"
+      fi
+      if [[ -z "$ci_state" ]]; then
+        ci_state="(no status reported yet)"
+      fi
+      echo "  Overall: $ci_state"
+    else
+      echo "  ⚠️  Could not fetch CI status"
+    fi
+  fi
+}
+
+cmd_logs() {
+  local job_name="${1:-}"
+  local sha="${2:-$(git rev-parse HEAD)}"
+
+  echo "Fetching CI log for commit ${sha:0:8}${job_name:+ (job: $job_name)}..."
+  echo ""
+
+  local log_output
+  if log_output=$(fetch_job_log "$sha" "$job_name"); then
+    echo "$log_output"
+  else
+    echo "❌ Could not retrieve log. Check:"
+    echo "  - Is the commit SHA correct? (got: ${sha:0:12})"
+    echo "  - Does the job name match?"
+    echo "  - Run './scripts/ci-debug status ${sha:0:8}' to see available jobs"
+  fi
+}
+
+cmd_analyze_deps() {
+  echo "Analyzing tree-sitter dependencies..."
+  echo ""
+  echo "Packages imported by analyzers:"
+  grep -h "import tree_sitter_" "$REPO_ROOT/src/hypergumbo/analyze/"*.py 2>/dev/null | \
+    grep -v language_pack | \
+    sed 's/.*import //' | \
+    sed 's/ .*//' | \
+    sort -u | while read pkg; do
+      # Convert module name to package name (tree_sitter_c_sharp -> tree-sitter-c-sharp)
+      pkg_name=$(echo "$pkg" | sed 's/_/-/g')
+      # Check if in pyproject.toml (exact match with >= or > version constraint)
+      if grep -qE "\"$pkg_name>=" "$REPO_ROOT/pyproject.toml" 2>/dev/null; then
+        echo "  ✅ $pkg_name (in pyproject.toml)"
+      else
+        echo "  ❌ $pkg_name (MISSING from pyproject.toml)"
+      fi
+    done
+  echo ""
+  echo "Language-pack users (covered by tree-sitter-language-pack):"
+  grep -l "tree_sitter_language_pack" "$REPO_ROOT/src/hypergumbo/analyze/"*.py 2>/dev/null | \
+    xargs -I{} basename {} .py | \
+    while read name; do
+      echo "  ✅ $name (uses language-pack)"
+    done
+}
+
+case "${1:-runs}" in
+  runs)
+    cmd_runs
+    ;;
+  status)
+    cmd_status "${2:-}"
+    ;;
+  pr-status)
+    cmd_pr_status "${2:-}"
+    ;;
+  logs)
+    cmd_logs "${2:-}" "${3:-}"
+    ;;
+  analyze-deps)
+    cmd_analyze_deps
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $1"
+    usage
+    exit 1
+    ;;
+esac
