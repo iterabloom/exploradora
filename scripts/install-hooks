@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Install the repository's git hooks for this clone (idempotent).
+#
+# Sets core.hooksPath to .githooks/ and verifies the runtime dependencies
+# the hooks need. Adapted from hypergumbo's install-hooks; the pytest
+# smart-test shim and tracker textconv wiring are not ported (this repo
+# uses plain pytest and has no tracker).
+set -euo pipefail
+
+have() { command -v "$1" >/dev/null 2>&1; }
+die()  { echo "error: $*" >&2; exit 1; }
+
+require_cmd() {
+  local c="$1"
+  have "$c" || die "missing required command: $c"
+}
+
+# Ensure at least one of the provided commands exists.
+require_one_of() {
+  local label="$1"; shift
+  local found=()
+  local c
+  for c in "$@"; do
+    if have "$c"; then found+=( "$c" ); fi
+  done
+  if (( ${#found[@]} == 0 )); then
+    die "missing dependency: need one of [$*] for $label"
+  fi
+}
+
+# -----------------------------
+# Repo checks
+# -----------------------------
+require_cmd git
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -n "$repo_root" ]] || die "not inside a git repository"
+
+cd "$repo_root"
+
+hooks_path=".githooks"
+commit_msg_hook="$hooks_path/commit-msg"
+prepare_hook="$hooks_path/prepare-commit-msg"
+pre_commit_hook="$hooks_path/pre-commit"
+pre_push_hook="$hooks_path/pre-push"
+
+[[ -d "$hooks_path" ]]    || die "expected $hooks_path/ directory at repo root"
+[[ -f "$commit_msg_hook" ]] || die "expected hook file $commit_msg_hook"
+[[ -f "$prepare_hook" ]]    || die "expected hook file $prepare_hook"
+[[ -f "$pre_commit_hook" ]] || die "expected hook file $pre_commit_hook"
+[[ -f "$pre_push_hook" ]]   || die "expected hook file $pre_push_hook"
+
+# -----------------------------
+# Dependency checks for commit-msg hook
+# -----------------------------
+# 1) SHA-256 provider
+require_one_of "SHA-256 hashing" sha256sum shasum openssl python3
+
+# sha256_hex() uses awk when using sha256sum/shasum/openssl branches.
+# Since the hook prefers those branches if present, enforce awk when any are available.
+if have sha256sum || have shasum || have openssl; then
+  require_cmd awk
+fi
+
+# 2) Secret generation provider
+require_one_of "secret generation" openssl base64 python3
+# If the secret generation falls back to base64, it uses /dev/urandom and head.
+if have base64 && ! have openssl && ! have python3; then
+  [[ -r /dev/urandom ]] || die "need readable /dev/urandom for base64 secret generation fallback"
+  require_cmd head
+fi
+
+# 3) Regex escaping for literal brand lines
+require_one_of "brand pattern escaping" sed perl python3
+
+# 4) Case-insensitive replacement engine
+require_one_of "case-insensitive replacement" perl python3
+
+# -----------------------------
+# Install hooks
+# -----------------------------
+chmod +x "$hooks_path"/* 2>/dev/null || true
+
+git config --local core.hooksPath "$hooks_path"
+
+echo "✅ Git hooks installed for this clone"
+echo "   core.hooksPath=$(git config --local --get core.hooksPath)"
+echo "   Dependencies look OK for commit-msg hook."
+echo "   Secret will be auto-generated on first commit by commit-msg hook."
+echo ""
+echo "   Pre-commit hook requires: ruff, bandit"
+echo "   Install with: pip install ruff bandit  (or run ./scripts/dev-install)"
+if have ruff; then
+  echo "     ✓ ruff installed"
+else
+  echo "     ✗ ruff NOT installed (commits will fail)"
+fi
+if have bandit; then
+  echo "     ✓ bandit installed"
+else
+  echo "     ✗ bandit NOT installed (commits will fail)"
+fi
