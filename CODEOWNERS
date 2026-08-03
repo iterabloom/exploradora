@@ -1,0 +1,40 @@
+# CODEOWNERS — governance-file review gate.
+#
+# Every path below requires review/approval from @jgstern (the human maintainer).
+# The agent account (jgstern-agent) must NOT self-approve or self-merge PRs that
+# touch these files (AGENTS.md §Governance Files). This file is the forge-enforced
+# mirror of that authoritative list.
+#
+# SYNTAX: GitHub reads this as gitignore-style globs (leading "/" anchors to the
+# repo root; a trailing "/" matches a directory and everything under it).
+# For enforcement, branch protection must enable "require review from Code Owners".
+
+# --- Agent-policy & governance config --------------------------------------
+/AGENTS.md                     @jgstern
+/ALLOWED_WEBSITES.md           @jgstern
+/CODEOWNERS                    @jgstern
+
+# --- Licensing -------------------------------------------------------------
+/LICENSE                       @jgstern
+/LICENSE-APACHE                @jgstern
+/LICENSING.md                  @jgstern
+/src/exploradora/core/LICENSE  @jgstern
+
+# --- Git hooks, installation & agent-policy validation ---------------------
+/.githooks/                    @jgstern
+/.agent/                       @jgstern
+/scripts/install-hooks         @jgstern
+/scripts/validate-agents.sh    @jgstern
+/scripts/license-headers       @jgstern
+
+# --- Forge-automation scripts (CI / PR) ------------------------------------
+/scripts/auto-pr               @jgstern
+/scripts/merge-pr              @jgstern
+/scripts/contribute            @jgstern
+/scripts/ci-debug              @jgstern
+/scripts/list-my-prs           @jgstern
+/scripts/lib/forgejo-api.sh    @jgstern
+/scripts/lib/github-api.sh     @jgstern
+
+# --- CI pipeline definitions -----------------------------------------------
+/.woodpecker/                  @jgstern
