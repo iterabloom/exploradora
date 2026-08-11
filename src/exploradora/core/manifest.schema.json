@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iterabloom/exploradora/blob/dev/src/exploradora/core/manifest.schema.json",
+  "title": "exploradora adapter manifest, schema_version 0",
+  "description": "Interoperability artifact for the adapter manifest. The executable source of truth is exploradora.core.manifest.validate(); a unit test keeps this document's required lists, enums, patterns, and bounds in lockstep with it. Unknown fields are legal everywhere (forward compatibility) but must obey the canonical-form rules: numbers are integers with |n| < 2**53, strings contain no lone surrogates. An adapter's identity is the sha256 of the RFC 8785 (JCS) serialization of this document; the manifest never embeds its own hash, and the top-level key 'identity' is reserved and rejected.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "name",
+    "version",
+    "frame",
+    "weights",
+    "provenance",
+    "claims",
+    "attestations"
+  ],
+  "not": { "required": ["identity"] },
+  "properties": {
+    "schema_version": { "type": "integer", "const": 0 },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$"
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["base_model", "a0_seed", "rank", "tokenizer_sha256", "parameterization"],
+      "properties": {
+        "base_model": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "a0_seed": { "type": "integer", "minimum": 0, "exclusiveMaximum": 9007199254740992 },
+        "rank": { "type": "integer", "minimum": 1, "maximum": 65536 },
+        "tokenizer_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "parameterization": { "enum": ["lora", "dora"] }
+      }
+    },
+    "weights": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["filename", "sha256"],
+      "properties": {
+        "filename": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^(?!\\.{1,2}$)[^/\\\\]+$"
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["generator_class", "training_data", "license"],
+      "properties": {
+        "generator_class": {
+          "enum": ["human", "local", "hosted", "frontier", "mixed", "unknown"]
+        },
+        "training_data": { "type": "string" },
+        "license": { "type": "string", "minLength": 1 }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["task_id", "result", "io_sha256", "recipe_note", "verification", "oracle_basis"],
+        "properties": {
+          "task_id": { "type": "string", "minLength": 1 },
+          "result": { "enum": ["pass", "fail"] },
+          "io_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "recipe_note": { "type": "string" },
+          "verification": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["mutation", "property_coverage", "spec_gap", "spec_provenance"],
+            "properties": {
+              "mutation": { "$ref": "#/$defs/counter_pair_killed" },
+              "property_coverage": { "$ref": "#/$defs/counter_pair_covered" },
+              "spec_gap": { "$ref": "#/$defs/counter_pair_found" },
+              "spec_provenance": {
+                "enum": ["upstream-suite", "authored-from-spec", "minted", "unknown"]
+              }
+            }
+          },
+          "oracle_basis": { "enum": ["executable-oracle", "stance-coherent"] }
+        }
+      }
+    },
+    "attestations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["attester", "claim_ref", "agreement_relation", "result"],
+        "properties": {
+          "attester": { "type": "string", "minLength": 1 },
+          "claim_ref": { "type": "string", "minLength": 1 },
+          "agreement_relation": {
+            "enum": ["bitwise", "reference-stack", "numeric-tolerance", "verdict-level"]
+          },
+          "result": { "enum": ["agree", "disagree"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "counter_pair_killed": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["killed", "total"],
+      "properties": {
+        "killed": { "type": "integer", "minimum": 0, "exclusiveMaximum": 9007199254740992 },
+        "total": { "type": "integer", "minimum": 0, "exclusiveMaximum": 9007199254740992 }
+      }
+    },
+    "counter_pair_covered": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["covered", "total"],
+      "properties": {
+        "covered": { "type": "integer", "minimum": 0, "exclusiveMaximum": 9007199254740992 },
+        "total": { "type": "integer", "minimum": 0, "exclusiveMaximum": 9007199254740992 }
+      }
+    },
+    "counter_pair_found": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["found", "probed"],
+      "properties": {
+        "found": { "type": "integer", "minimum": 0, "exclusiveMaximum": 9007199254740992 },
+        "probed": { "type": "integer", "minimum": 0, "exclusiveMaximum": 9007199254740992 }
+      }
+    }
+  }
+}

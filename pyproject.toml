@@ -44,6 +44,10 @@ dev = [
   "pytest-cov",
   "pytest-xdist",
   "hypothesis",
+  # Executes the interop artifact (manifest.schema.json) against the same
+  # valid/invalid corpus the Python validator is tested on; the CI package
+  # step's fresh venv omits it, exercising the skip path.
+  "jsonschema",
   "ruff",
   "bandit",
   "yamllint",
@@ -51,6 +55,12 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# The JSON Schema is the schema layer's interoperability artifact; shipping it
+# in the wheel is load-bearing (manifest.schema() reads it via importlib.resources,
+# and the CI package step runs the suite against the installed wheel).
+"exploradora.core" = ["*.schema.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
