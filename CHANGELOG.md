@@ -7,6 +7,8 @@ All notable changes to exploradora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-11
+
 ### Added
 
 - Package skeleton: `src/` layout, `exploradora` console script, dual-license
