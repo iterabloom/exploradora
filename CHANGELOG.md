@@ -7,6 +7,47 @@ All notable changes to exploradora are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `.github/workflows/release.yml` — the thing a pushed tag triggers. Until
+  now `tag-release` pushed `vX.Y.Z` and nothing consumed it: the tag was
+  decorative and every artifact-producing step was an unwritten manual
+  ritual. Two entry points: a tag push runs the real release (security
+  audit, build, PyPI upload, GitHub Release with wheels, sdist,
+  `SHA256SUMS`, and a best-effort SBOM), and `workflow_dispatch` with
+  `dry_run=true` runs the mandatory TestPyPI rehearsal.
+- `tag-release --dry-run`, and recovery for an already-existing tag.
+- Signing-key detection in `tag-release`: `$GPG_KEY_ID`, then
+  `git config user.signingkey` (honoring `gpg.format`, so SSH signing keys
+  work). With neither, the script explains the options and offers an
+  unsigned annotated tag instead of dying on a raw `gpg` error.
+- `tag-release` refuses to push when `.github/workflows/release.yml` is
+  absent from `main` — the guard for the failure mode above.
+
+### Changed
+
+- **Release ordering inverted.** The tag no longer records an upload that
+  already happened; it *causes* the upload. `AGENTS.md`, the release-workflow
+  playbook, and the `prepare-release` handoff all reflect the new sequence:
+  merge → rehearse on TestPyPI → tag (publishes).
+- Index-token custody moved from "human's shell at upload time" to GitHub
+  repository secrets (`PYPI_TOKEN`, `TEST_PYPI_TOKEN`), readable only by the
+  release workflow. The agent still never holds, reads, or uses an index
+  token. `AGENTS.md` §Security Boundaries and `ALLOWED_WEBSITES.md` amended
+  to state the boundary in its new location.
+- `.github/` is now covered by the SPDX header check (`scripts/license-headers`)
+  and by yamllint in both the pre-commit hook and the Woodpecker gate. A new
+  CI directory would otherwise have been exempt from both.
+- `release-check` names its missing prerequisites (`build`, `twine`, which
+  ship in the `[dev]` extra) instead of failing with a `ModuleNotFoundError`
+  traceback.
+
+### Fixed
+
+- The release-workflow playbook no longer claims the release scripts are
+  "not yet ported" — they were ported before this change, leaving the
+  playbook describing a state that had not been true for several commits.
+
 ## [0.1.0] - 2026-08-11
 
 ### Added

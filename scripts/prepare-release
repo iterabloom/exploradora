@@ -13,9 +13,11 @@
 #   6. ./scripts/auto-pr — merges the release commit to dev
 #   7. Opens the dev -> main PR via BASE_BRANCH=main auto-pr --gov (pushes,
 #      runs CI, does NOT merge — the human reviews and merges)
-#   8. Prints the handoff and STOPS. The TestPyPI rehearsal, the real upload,
-#      and ./scripts/tag-release are HUMAN actions; index tokens never touch
-#      the agent (AGENTS.md §Security Boundaries).
+#   8. Prints the handoff and STOPS. Merging the PR, running the TestPyPI
+#      rehearsal, and ./scripts/tag-release are HUMAN actions. Publishing
+#      itself is performed by .github/workflows/release.yml using repository
+#      secrets; no index token is ever readable by the agent
+#      (AGENTS.md §Security Boundaries).
 #
 # All forge/CI interaction goes through auto-pr (the CI Interaction Policy);
 # this script never calls the API directly.
@@ -110,18 +112,24 @@ else
     git checkout -b "jgstern-agent/chore/release-v$VERSION-to-main"
     BASE_BRANCH=main ./scripts/auto-pr --gov \
         --title "Release v$VERSION" \
-        --description "Merge dev into main for the v$VERSION release. Reviewer checklist: version bumped, CHANGELOG rolled, CI green. After merging: TestPyPI rehearsal, real upload, ./scripts/tag-release $VERSION (all human-held)."
+        --description "Merge dev into main for the v$VERSION release. Reviewer checklist: version bumped, CHANGELOG rolled, CI green. After merging: run the Release workflow with dry_run=true (TestPyPI rehearsal), verify install-from-index, then ./scripts/tag-release $VERSION — the tag push publishes to PyPI and cuts the GitHub Release."
 fi
 
 echo ""
 echo -e "${CYAN}═══ HANDOFF TO HUMAN — the agent STOPS here ═══${NC}"
 echo ""
 echo "  1. Review + merge the 'Release v$VERSION' PR (dev -> main) on GitHub"
-echo "  2. Rehearse on TestPyPI (not skippable), from dist/ built by release-check:"
-echo "       twine upload --repository testpypi dist/*"
-echo "       pip install --index-url https://test.pypi.org/simple/ --no-deps exploradora  # fresh venv"
-echo "  3. Real upload:  twine upload dist/*"
-echo "  4. Tag (GPG-signed), after the upload succeeded:"
+echo "  2. Rehearse on TestPyPI (not skippable) — Actions -> Release -> Run"
+echo "     workflow, dry_run=true. It builds and uploads to TestPyPI."
+echo "     Then verify install-from-index in a fresh venv:"
+echo "       pip install --index-url https://test.pypi.org/simple/ \\"
+echo "           --extra-index-url https://pypi.org/simple/ exploradora==$VERSION"
+echo "  3. Tag — the tag push is what publishes:"
 echo "       ./scripts/tag-release $VERSION"
 echo ""
-echo "  Index tokens are human-held; the agent never uploads."
+echo "  NOTE: the ordering inverted when publishing was automated. The tag no"
+echo "  longer records an upload you already did; it CAUSES the upload. PyPI"
+echo "  forbids version reuse, so step 2 is your only rehearsal."
+echo ""
+echo "  Index tokens live in repository secrets (PYPI_TOKEN / TEST_PYPI_TOKEN)"
+echo "  and are never readable by the agent."

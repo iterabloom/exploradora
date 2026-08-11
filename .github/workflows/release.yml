@@ -1,0 +1,264 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: Release
+
+# The thing a pushed tag triggers.
+#
+# Before this workflow existed, `scripts/tag-release` pushed `vX.Y.Z` and
+# nothing consumed it: the tag was decorative, and every artifact-producing
+# step was an unwritten manual ritual. This file is the consumer.
+#
+# Two entry points, deliberately asymmetric:
+#
+#   push tag v*        -> the real release. Audit, build, publish to PyPI,
+#                         cut a GitHub Release with assets. Human-authorized
+#                         by the act of pushing a signed tag.
+#   workflow_dispatch  -> the TestPyPI rehearsal (dry_run=true, the default).
+#                         Audit, build, publish to TestPyPI. No PyPI, no
+#                         GitHub Release, no tag required.
+#
+# The rehearsal is not decoration: AGENTS.md requires a full
+# upload -> install-from-index loop on TestPyPI before any real upload, and
+# this is where that requirement is discharged now that publishing is
+# automated. Run the dispatch, verify the install, then tag.
+#
+# Modeled on hypergumbo's .github/workflows/release.yml, reduced to the
+# single-package case. Two deliberate divergences from that model:
+#   1. pip-audit carries NO --ignore-vuln list. Hypergumbo's long list is
+#      load-bearing for its ML dependency stack; exploradora has exactly one
+#      runtime dependency (textual). Starting clean means the first ignore
+#      entry has to be argued for in a PR instead of inherited unexamined.
+#   2. A missing PYPI_TOKEN on a tag push is a HARD FAILURE, not a warning.
+#      Hypergumbo warns and continues. A release run that goes green while
+#      publishing nothing is precisely the kind of unearned green light this
+#      project's honesty rules exist to forbid.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Rehearse on TestPyPI instead of releasing to PyPI'
+        required: false
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+        default: 'true'
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Security audit — a hard gate. Nothing publishes if this fails.
+  # ─────────────────────────────────────────────────────────────
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip wheel setuptools
+          pip install -e ".[dev]"
+          pip install pip-audit pip-licenses
+
+      - name: Vulnerability scan (pip-audit)
+        run: |
+          # No --ignore-vuln entries by design (see header). If a CVE lands in
+          # the dependency tree, the release stops until it is fixed, pinned
+          # away, or ignored with a written rationale added right here.
+          pip-audit --skip-editable
+
+      - name: Security linting (bandit)
+        run: |
+          # --quiet suppresses bandit's per-file parser noise on free text
+          # following `# nosec` markers; the exit code is unaffected.
+          bandit -r src/ -c pyproject.toml --quiet
+
+      - name: License audit (informational)
+        run: |
+          # Informational only. The dual-license split that actually matters
+          # (Apache-2.0 core/, AGPL-3.0-or-later elsewhere) is enforced
+          # per-file by scripts/license-headers in the per-PR gate; this step
+          # reports what the DEPENDENCY tree carries.
+          pip-licenses --format=markdown
+
+  # ─────────────────────────────────────────────────────────────
+  # Build, verify, publish. Gated on security-audit.
+  # ─────────────────────────────────────────────────────────────
+  build-and-publish:
+    needs: [security-audit]
+    runs-on: ubuntu-latest
+    permissions:
+      # `gh release create` writes a Release object and uploads assets.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install build tools
+        run: |
+          pip install --upgrade pip wheel setuptools
+          pip install build twine cyclonedx-bom
+
+      - name: Resolve version and mode
+        id: resolve
+        run: |
+          set -euo pipefail
+          PYVER=$(grep '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            MODE="release"
+            # The tag is the authorization; pyproject.toml is the artifact's
+            # own claim about itself. If they disagree, the release PR was not
+            # merged (or not merged at the commit being tagged) and every
+            # downstream artifact would carry a version nobody approved.
+            if [[ "$VERSION" != "$PYVER" ]]; then
+              echo "::error::tag v$VERSION does not match pyproject.toml version $PYVER."
+              echo "::error::Is the dev->main release PR merged at this commit?"
+              exit 1
+            fi
+          else
+            VERSION="$PYVER"
+            if [[ "${{ github.event.inputs.dry_run }}" == "false" ]]; then
+              echo "::error::workflow_dispatch with dry_run=false is not a release path."
+              echo "::error::Push a signed tag (scripts/tag-release) to release."
+              exit 1
+            fi
+            MODE="rehearsal"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Version $VERSION, mode $MODE"
+
+      - name: Build sdist + wheel
+        run: |
+          rm -rf dist/
+          python -m build
+          ls -la dist/
+
+      - name: Verify metadata (twine check)
+        run: twine check dist/*
+
+      - name: Install the wheel and smoke the console script
+        run: |
+          set -euo pipefail
+          # Exercise the ARTIFACT, not the checkout. This catches missing
+          # package-data (manifest.schema.json is read via importlib.resources
+          # and must be in the wheel), a broken entry point, or an absent dep.
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install --quiet dist/*.whl
+          /tmp/fresh/bin/pip install --quiet pytest pytest-xdist hypothesis jsonschema
+          /tmp/fresh/bin/python -m pytest tests/ -q -n auto -p no:cacheprovider
+          GOT=$(/tmp/fresh/bin/exploradora --version)
+          echo "console script reports: $GOT"
+          test "$GOT" = "exploradora ${{ steps.resolve.outputs.version }}"
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum ./* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Generate SBOM
+        run: |
+          # Best-effort — never fail a release on SBOM tooling. A missing,
+          # empty, or unparseable file is DROPPED rather than uploaded:
+          # GitHub rejects a 0-byte asset with "HTTP 400: Bad Content-Length",
+          # which is how hypergumbo's v7.0.0 release run died.
+          cyclonedx-py environment --output-format JSON --output-file dist/sbom.json \
+            || cyclonedx-py environment -o dist/sbom.json \
+            || true
+          if [[ -s dist/sbom.json ]] && python3 -c "import json; json.load(open('dist/sbom.json'))" 2>/dev/null; then
+            echo "SBOM generated ($(wc -c < dist/sbom.json) bytes)."
+          else
+            echo "::warning::SBOM generation produced no valid output — omitting it."
+            rm -f dist/sbom.json
+          fi
+
+      # ── Rehearsal path ────────────────────────────────────────
+      - name: Publish to TestPyPI (rehearsal)
+        if: steps.resolve.outputs.mode == 'rehearsal'
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TEST_PYPI_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TWINE_PASSWORD:-}" ]]; then
+            echo "::error::TEST_PYPI_TOKEN is not set in repository secrets."
+            echo "::error::The rehearsal cannot run without it (AGENTS.md: not skippable)."
+            exit 1
+          fi
+          twine upload --repository-url https://test.pypi.org/legacy/ \
+            dist/*.whl dist/*.tar.gz --skip-existing
+          echo "Rehearsal upload complete. Verify install-from-index in a fresh venv:"
+          echo "  pip install --index-url https://test.pypi.org/simple/ \\"
+          echo "      --extra-index-url https://pypi.org/simple/ \\"
+          echo "      exploradora==${{ steps.resolve.outputs.version }}"
+
+      # ── Release path ──────────────────────────────────────────
+      - name: Publish to PyPI
+        if: steps.resolve.outputs.mode == 'release'
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TWINE_PASSWORD:-}" ]]; then
+            echo "::error::PYPI_TOKEN is not set in repository secrets."
+            echo "::error::Failing loudly rather than cutting a Release for an unpublished version."
+            exit 1
+          fi
+          twine upload dist/*.whl dist/*.tar.gz --skip-existing
+
+      - name: Extract release notes from CHANGELOG
+        if: steps.resolve.outputs.mode == 'release'
+        run: |
+          VERSION="${{ steps.resolve.outputs.version }}"
+          awk '/^## \['"$VERSION"'\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
+          if [[ ! -s release_notes.md ]]; then
+            echo "::warning::CHANGELOG.md has no [$VERSION] section — using a stub."
+            printf 'Release v%s\n\nSee [CHANGELOG.md](CHANGELOG.md).\n' "$VERSION" > release_notes.md
+          fi
+          cat release_notes.md
+
+      - name: Create GitHub Release
+        if: steps.resolve.outputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.resolve.outputs.version }}"
+          TAG="v$VERSION"
+
+          # Mark pre-releases so they do not surface as "latest".
+          PRERELEASE_FLAG=""
+          case "$VERSION" in
+            *dev*|*rc*|*alpha*|*beta*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
+
+          ASSETS=(dist/*.whl dist/*.tar.gz dist/SHA256SUMS)
+          if [[ -s dist/sbom.json ]]; then
+            ASSETS+=(dist/sbom.json)
+          fi
+
+          # The tag already exists — this run was triggered by its push — so
+          # `gh release create` attaches a Release to it rather than making one.
+          gh release create "$TAG" "${ASSETS[@]}" \
+            --title "$TAG" \
+            --notes-file release_notes.md $PRERELEASE_FLAG
+
+          echo "Release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"

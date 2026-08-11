@@ -115,6 +115,8 @@ echo -n "  yamllint (YAML syntax)... "
 if command -v yamllint &> /dev/null; then
     YAML_TARGETS=""
     [ -d ".woodpecker" ] && YAML_TARGETS=".woodpecker/"
+    # .github/ holds the release workflow — same class of file, same gate.
+    [ -d ".github" ] && YAML_TARGETS="$YAML_TARGETS .github/"
     if [ -z "$YAML_TARGETS" ]; then
         echo -e "${YELLOW}skipped (no YAML dirs)${NC}"
     # shellcheck disable=SC2086
