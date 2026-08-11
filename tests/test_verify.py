@@ -169,4 +169,4 @@ def test_cli_help_names_verify_as_a_subcommand(capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main(["--help"])
     assert exc.value.code == 0
-    assert "under construction" in capsys.readouterr().out
+    assert "pre-alpha" in capsys.readouterr().out

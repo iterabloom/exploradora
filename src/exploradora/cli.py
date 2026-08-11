@@ -3,11 +3,14 @@
 
 How it works: ``build_parser()`` constructs an ``argparse`` parser fresh per
 invocation (no global state; tests inspect it directly). Subcommands are
-registered **only for verbs that work** — currently ``verify`` and ``init`` —
-and the pre-alpha status line names what is still under construction in
-roadmap voice. ``main()`` dispatches and returns an exit code rather than
-calling ``sys.exit`` itself, so the same function serves the console script
-and in-process tests.
+registered **only for verbs that work** — ``verify``, ``init``, ``browse``,
+``demo`` — and the pre-alpha status line keeps unbuilt territory in roadmap
+voice. ``main()`` dispatches and returns an exit code rather than calling
+``sys.exit`` itself, so the same function serves the console script and
+in-process tests. Bare ``exploradora`` opens the browser on the default
+library — the TUI is the no-args experience per the v0.1 brief. The
+``textual`` import happens lazily inside the browse path so that scripting
+verbs (``verify``/``init``) never pay the TUI's startup cost.
 
 ``verify`` renders ``exploradora.core.verify.verify_dir()``'s sections as a
 plain table, one row per concern, **with no overall verdict line**: the
@@ -31,14 +34,17 @@ import sys
 from importlib.metadata import version as _dist_version
 from pathlib import Path
 
+from exploradora import demo as client_demo
+from exploradora import library as client_library
 from exploradora.core import manifest as core_manifest
 from exploradora.core import scaffold as core_scaffold
 from exploradora.core import verify as core_verify
 
 #: One-line status, shown in --help. Roadmap voice, never feature voice.
 _STATUS = (
-    "pre-alpha: the manifest schema, `verify`, and `init` work; the TUI and "
-    "the demo command are under construction and arrive as they become real."
+    "pre-alpha: a local adapter-library explorer — the TUI (browse), verify, "
+    "init, and demo work; nothing is published to PyPI yet. The exchange, "
+    "p2p, and claim replay are roadmap, not features."
 )
 
 
@@ -107,6 +113,38 @@ def build_parser() -> argparse.ArgumentParser:
         "--weights", metavar="FILENAME",
         help="weights filename inside the directory (default: the sole candidate)",
     )
+
+    p_browse = sub.add_parser(
+        "browse",
+        help="open the TUI on an adapter library directory",
+        description=(
+            "Scans the library directory for adapter subdirectories (weights "
+            "file + manifest.json) and opens the browser: a table of adapters "
+            "with a manifest detail pane; press `v` to verify the selected "
+            "one. Every adapter starts as `unchecked` — scanning reads, only "
+            "verification verifies."
+        ),
+    )
+    p_browse.add_argument(
+        "library_dir", nargs="?", type=Path, default=None,
+        help=f"library to scan (default: {client_library.DEFAULT_LIBRARY_DIR})",
+    )
+
+    p_demo = sub.add_parser(
+        "demo",
+        help="build the sample library and open the TUI on it",
+        description=(
+            "Creates two deterministic sample adapters — one valid, one with "
+            "weights deliberately corrupted after its manifest was written, so "
+            "verification has something real to catch — and opens the browser "
+            "on them. The sample weights are structurally valid safetensors "
+            "but NOT trained adapters, and their manifests say so."
+        ),
+    )
+    p_demo.add_argument(
+        "--library", type=Path, default=None,
+        help=f"where to build the sample library (default: {client_demo.DEFAULT_DEMO_DIR})",
+    )
     return parser
 
 
@@ -130,8 +168,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if core_verify.ok_to_exit_zero(sections) else 1
     if args.command == "init":
         return _run_init(args)
-    # No subcommand given: explain, succeed — nothing was asked, nothing failed.
-    parser.print_help()
+    if args.command == "browse":
+        return _run_browse(args.library_dir)
+    if args.command == "demo":
+        target = args.library if args.library is not None else client_demo.DEFAULT_DEMO_DIR
+        client_demo.build_demo_library(target)
+        return _run_browse(target)
+    # No subcommand: the TUI on the default library is the no-args experience.
+    return _run_browse(None)
+
+
+def _run_browse(library_dir: Path | None) -> int:
+    from exploradora import tui  # deferred: scripting verbs never pay textual's import cost
+
+    tui.run_browser(library_dir if library_dir is not None else client_library.DEFAULT_LIBRARY_DIR)
     return 0
 
 
