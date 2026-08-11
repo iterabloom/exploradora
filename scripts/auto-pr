@@ -1128,12 +1128,20 @@ flush_queue() {
 		return 0
 	fi
 
-	# Backend-aware credentials (C9). USER is required only on the forgejo
-	# backend, where pushes ride HTTPS credential helpers; on github the
-	# push is SSH and the API authenticates with FORGE_TOKEN alone.
+	# Backend-aware credentials (C9). On the forgejo backend USER is required
+	# and comes from FORGEJO_USER. On the github backend the push rides the
+	# SAME https credential helper (the old comment claimed SSH — false for
+	# https clones), and git sends the request UNAUTHENTICATED when the helper
+	# emits an empty username: measured live 2026-08-10 as "remote: No
+	# anonymous write access" with a valid token present. Any non-empty
+	# username works with a PAT; x-access-token is the conventional one.
 	detect_forge_backend
 	resolve_forge_token
-	USER="${FORGEJO_USER:-}"
+	if [[ "${FORGE_BACKEND:-forgejo}" == "github" ]]; then
+		USER="${FORGEJO_USER:-x-access-token}"
+	else
+		USER="${FORGEJO_USER:-}"
+	fi
 	TOKEN="${FORGE_TOKEN:-}"
 	if [[ "${FORGE_BACKEND:-forgejo}" != "github" && -z "$USER" ]]; then
 		echo "Error: FORGEJO_USER environment variable is not set."
@@ -1529,12 +1537,20 @@ do_pr() {
 	# warning about.
 	_autopr_run_started_epoch=$(date +%s)
 
-	# Backend-aware credentials (C9). USER is required only on the forgejo
-	# backend, where pushes ride HTTPS credential helpers; on github the
-	# push is SSH and the API authenticates with FORGE_TOKEN alone.
+	# Backend-aware credentials (C9). On the forgejo backend USER is required
+	# and comes from FORGEJO_USER. On the github backend the push rides the
+	# SAME https credential helper (the old comment claimed SSH — false for
+	# https clones), and git sends the request UNAUTHENTICATED when the helper
+	# emits an empty username: measured live 2026-08-10 as "remote: No
+	# anonymous write access" with a valid token present. Any non-empty
+	# username works with a PAT; x-access-token is the conventional one.
 	detect_forge_backend
 	resolve_forge_token
-	USER="${FORGEJO_USER:-}"
+	if [[ "${FORGE_BACKEND:-forgejo}" == "github" ]]; then
+		USER="${FORGEJO_USER:-x-access-token}"
+	else
+		USER="${FORGEJO_USER:-}"
+	fi
 	TOKEN="${FORGE_TOKEN:-}"
 	if [[ "${FORGE_BACKEND:-forgejo}" != "github" && -z "$USER" ]]; then
 		echo "Error: FORGEJO_USER environment variable is not set."
