@@ -54,19 +54,17 @@ def test_unknown_argument_fails_with_argparse_conventions(capsys):
     assert "unrecognized arguments" in err
 
 
-def test_no_feature_verbs_are_advertised_before_they_exist(capsys):
-    """Honesty guard: help must not name unbuilt commands in feature voice.
+def test_only_implemented_verbs_are_advertised(capsys):
+    """Honesty guard: the parser's subcommands are exactly the implemented verbs.
 
-    The v0.1 verbs (init/verify/demo) may appear only inside the roadmap-voice
-    status sentence — never as actual argparse subcommands — until they work.
-    This test fails the moment someone registers a subcommand without features
-    behind it, or drops the status sentence while the parser still has none.
+    Unbuilt verbs (init/demo, the TUI) may appear only inside the roadmap-voice
+    status sentence. This test is the place a new verb gets added — deliberately,
+    with its feature — and fails on any drive-by registration.
     """
     parser = cli.build_parser()
-    assert not any(
-        isinstance(a, object) and a.__class__.__name__ == "_SubParsersAction"
-        for a in parser._actions
-    )
+    subactions = [a for a in parser._actions if a.__class__.__name__ == "_SubParsersAction"]
+    assert len(subactions) == 1
+    assert sorted(subactions[0].choices) == ["verify"]
     with pytest.raises(SystemExit):
         cli.main(["--help"])
     assert "under construction" in capsys.readouterr().out
