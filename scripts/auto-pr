@@ -1128,15 +1128,20 @@ flush_queue() {
 		return 0
 	fi
 
+	# Backend-aware credentials (C9). USER is required only on the forgejo
+	# backend, where pushes ride HTTPS credential helpers; on github the
+	# push is SSH and the API authenticates with FORGE_TOKEN alone.
+	detect_forge_backend
+	resolve_forge_token
 	USER="${FORGEJO_USER:-}"
-	TOKEN="${FORGEJO_TOKEN:-}"
-	if [[ -z "$USER" ]]; then
+	TOKEN="${FORGE_TOKEN:-}"
+	if [[ "${FORGE_BACKEND:-forgejo}" != "github" && -z "$USER" ]]; then
 		echo "Error: FORGEJO_USER environment variable is not set."
 		_autopr_state_final="auth_error"
 		exit 1
 	fi
 	if [[ -z "$TOKEN" ]]; then
-		echo "Error: FORGEJO_TOKEN environment variable is not set."
+		echo "Error: no forge credential. Set EXPL_GITHUB_TOKEN (github backend) or FORGEJO_TOKEN in .env."
 		_autopr_state_final="auth_error"
 		exit 1
 	fi
@@ -1524,15 +1529,20 @@ do_pr() {
 	# warning about.
 	_autopr_run_started_epoch=$(date +%s)
 
+	# Backend-aware credentials (C9). USER is required only on the forgejo
+	# backend, where pushes ride HTTPS credential helpers; on github the
+	# push is SSH and the API authenticates with FORGE_TOKEN alone.
+	detect_forge_backend
+	resolve_forge_token
 	USER="${FORGEJO_USER:-}"
-	TOKEN="${FORGEJO_TOKEN:-}"
-	if [[ -z "$USER" ]]; then
+	TOKEN="${FORGE_TOKEN:-}"
+	if [[ "${FORGE_BACKEND:-forgejo}" != "github" && -z "$USER" ]]; then
 		echo "Error: FORGEJO_USER environment variable is not set."
 		_autopr_state_final="auth_error"
 		exit 1
 	fi
 	if [[ -z "$TOKEN" ]]; then
-		echo "Error: FORGEJO_TOKEN environment variable is not set."
+		echo "Error: no forge credential. Set EXPL_GITHUB_TOKEN (github backend) or FORGEJO_TOKEN in .env."
 		_autopr_state_final="auth_error"
 		exit 1
 	fi
