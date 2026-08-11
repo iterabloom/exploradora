@@ -30,6 +30,24 @@ cd "$PROJECT_ROOT"
 PY="$PROJECT_ROOT/.venv/bin/python"
 [[ -x "$PY" ]] || PY=python3
 
+# Preflight: `build` and `twine` ship in the [dev] extra, not with the
+# interpreter. Without a dev venv on PATH, step 1 used to die on a raw
+# ModuleNotFoundError traceback, which reads as "release-check is broken"
+# rather than "this machine has no dev install". Name the gap instead.
+MISSING=()
+"$PY" -c "import build" 2>/dev/null || MISSING+=("build")
+"$PY" -c "import twine" 2>/dev/null || MISSING+=("twine")
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+    echo -e "${RED}✗${NC} missing release tooling for $PY: ${MISSING[*]}" >&2
+    echo "" >&2
+    echo "  Install the dev extra (which pins both):" >&2
+    echo "    $PY -m pip install -e '.[dev]'" >&2
+    echo "" >&2
+    echo "  Or create the venv this script prefers:" >&2
+    echo "    python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'" >&2
+    exit 1
+fi
+
 VERSION=$(grep '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
 echo "release-check for version $VERSION"
 echo ""

@@ -7,7 +7,7 @@
 - Prefer HTTPS.
 - Read-only research: GET/HEAD only (no posting credentials, no uploading repo content).
 - No authentication tokens may be pasted into URLs or headers, except by the approved forge scripts (`auto-pr`, `merge-pr`, `ci-debug`, `contribute`, `list-my-prs`) reading from `.env`.
-- Package-index uploads (PyPI, TestPyPI) are a human-only action. The agent never holds or uses an index token.
+- Package-index uploads (PyPI, TestPyPI) are never performed by the agent. They are performed by `.github/workflows/release.yml` using GitHub repository secrets, and are human-authorized: the TestPyPI upload requires a human to dispatch the workflow, and the PyPI upload requires a human to push a signed tag. The agent never holds, reads, or uses an index token.
 - If a needed domain is missing, stop and request human approval to add it (domain + rationale).
 
 ## Search / discovery
@@ -31,9 +31,9 @@
 - test.pypi.org
 # Rationale for test.pypi.org: the release workflow requires a full
 # upload → install-from-index rehearsal on TestPyPI before any real
-# upload. The upload legs are human-only (see Rules); the agent's use
-# is limited to install-from-index verification (pip) and read-only
-# project-page checks.
+# upload. The upload legs run in CI under human authorization (see
+# Rules); the agent's use is limited to install-from-index verification
+# (pip) and read-only project-page checks.
 
 ## Official docs / standards
 - docs.python.org

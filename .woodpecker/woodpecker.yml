@@ -43,7 +43,12 @@ steps:
         else
           bandit -r src/ --quiet
         fi
-      - yamllint -c .yamllint.yaml .woodpecker/
+      - |
+        # .github/ holds the release workflow. Guarded rather than hardcoded so
+        # the step still works on a branch cut before that directory existed.
+        TARGETS=".woodpecker/"
+        if [ -d .github ]; then TARGETS="$TARGETS .github/"; fi
+        yamllint -c .yamllint.yaml $TARGETS
       - ./scripts/license-headers
       - bash scripts/validate-agents.sh
 

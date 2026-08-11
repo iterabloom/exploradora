@@ -46,7 +46,11 @@ EXTENSION_STYLE = {
 }
 
 # Directories to scan (relative to repo root)
-SCAN_DIRS = ["src", "tests", "scripts", "docs", ".githooks", ".woodpecker"]
+# .github is listed for the same reason .woodpecker is: it holds CI definitions,
+# which are source. It was absent while the directory itself was absent, so the
+# release workflow would otherwise have been the one CI file exempt from the
+# dual-license split this script exists to enforce.
+SCAN_DIRS = ["src", "tests", "scripts", "docs", ".githooks", ".woodpecker", ".github"]
 
 # Root-level files to scan (relative to repo root)
 SCAN_ROOT_GLOBS = ["*.md", "*.yaml", "*.yml"]
