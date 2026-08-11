@@ -16,13 +16,11 @@ import pytest
 from exploradora import cli
 
 
-def test_bare_invocation_prints_help_and_succeeds(capsys):
-    """No subcommands exist, so `exploradora` explains itself and exits 0."""
-    rc = cli.main([])
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "usage: exploradora" in out
-    assert "pre-alpha" in out          # the honest status line is user-visible
+def test_bare_invocation_opens_the_browser():
+    """`exploradora` with no args is the TUI (v0.1 brief item 3); pinned in test_tui.py."""
+    from exploradora import tui
+
+    assert hasattr(tui, "run_browser")  # the dispatch itself is asserted in test_tui.py
 
 
 def test_help_flag_exits_zero_and_names_the_status(capsys):
@@ -64,7 +62,7 @@ def test_only_implemented_verbs_are_advertised(capsys):
     parser = cli.build_parser()
     subactions = [a for a in parser._actions if a.__class__.__name__ == "_SubParsersAction"]
     assert len(subactions) == 1
-    assert sorted(subactions[0].choices) == ["init", "verify"]
+    assert sorted(subactions[0].choices) == ["browse", "demo", "init", "verify"]
     with pytest.raises(SystemExit):
         cli.main(["--help"])
-    assert "under construction" in capsys.readouterr().out
+    assert "roadmap, not features" in capsys.readouterr().out

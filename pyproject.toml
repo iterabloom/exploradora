@@ -25,9 +25,13 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-# No runtime dependencies yet. Each future dependency gets a written
-# justification here when it lands (AGENTS.md: minimal deps, each justified).
-dependencies = []
+# Each dependency carries a written justification (AGENTS.md: minimal deps).
+# - textual: the TUI is the product face of v0.1 (brief item 3) and the sole
+#   runtime dependency. rich arrives only transitively and is never imported
+#   directly. safetensors is deliberately ABSENT: v0.1 hashes weights bytes
+#   and never parses tensors — even the demo fixture writes its (structurally
+#   valid) safetensors file with stdlib struct+json.
+dependencies = ["textual>=8.2,<9"]
 
 [project.urls]
 Repository = "https://github.com/iterabloom/exploradora"
