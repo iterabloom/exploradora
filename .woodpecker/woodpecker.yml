@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Woodpecker per-PR CI gate for exploradora. Modeled on hypergumbo's
+# .woodpecker/woodpecker.yml (same instance, same conventions). The workflow
+# NAME is this file's stem (`woodpecker`), so the GitHub status context is
+# `ci/woodpecker/pr/woodpecker` — VERIFY the exact context on the first real
+# run before marking it required in branch protection.
+#
+# Bootstrap note (honest gap): the package skeleton (pyproject.toml, tests/)
+# lands in Phase 2. Until then the python-package steps below detect the
+# missing pyproject.toml and skip LOUDLY (visible in step logs). The gate is
+# still real for what exists: lint, license headers, agent policy, DCO.
+# When pyproject.toml lands, the same steps run in full with no CI edit.
+# Planned Phase-2 upgrade (needs its own human-reviewed .woodpecker/ change):
+# extend the console-script smoke from `--help` to `exploradora demo`.
+
+when:
+  - event: pull_request
+  - event: push
+    branch: [dev, main]
+
+# Full clone (mirrors hypergumbo's battle-tested config): the dco step's
+# `git merge-base origin/$CI_COMMIT_TARGET_BRANCH HEAD` needs the fork-point
+# commit, which a shallow/partial clone truncates away — merge-base then
+# exits 1 and set -e kills the step (observed live on this repo's first
+# pipeline, PR #2). The repo is tiny, so a complete clone costs nothing.
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      partial: false
+
+steps:
+  lint:
+    image: python:3.11-bookworm
+    commands:
+      - pip install --quiet ruff bandit yamllint
+      - ruff check --no-cache src/
+      - if [ -d tests ]; then ruff check --no-cache tests/; fi
+      - |
+        if [ -f pyproject.toml ]; then
+          bandit -r src/ -c pyproject.toml --quiet
+        else
+          bandit -r src/ --quiet
+        fi
+      - |
+        # .github/ holds the release workflow. Guarded rather than hardcoded so
+        # the step still works on a branch cut before that directory existed.
+        TARGETS=".woodpecker/"
+        if [ -d .github ]; then TARGETS="$TARGETS .github/"; fi
+        yamllint -c .yamllint.yaml $TARGETS
+      - ./scripts/license-headers
+      - bash scripts/validate-agents.sh
+
+  dco:
+    image: python:3.11-bookworm
+    when:
+      - event: pull_request
+    commands:
+      # --unshallow backstop (no-op on the full clone above; guards against a
+      # server-side clone override reintroducing shallowness)
+      - |
+        git fetch --unshallow origin "$CI_COMMIT_TARGET_BRANCH" 2>/dev/null \
+          || git fetch origin "$CI_COMMIT_TARGET_BRANCH"
+      - |
+        base=$(git merge-base "origin/$CI_COMMIT_TARGET_BRANCH" HEAD)
+        bad=""
+        for sha in $(git rev-list --no-merges "$base..HEAD"); do
+          if ! git log -1 --format='%B' "$sha" | grep -q '^Signed-off-by:'; then
+            bad="$bad $sha"
+          fi
+        done
+        if [ -n "$bad" ]; then
+          echo "Commits missing DCO Signed-off-by trailer:"
+          for s in $bad; do git log -1 --oneline "$s"; done
+          exit 1
+        fi
+        echo "DCO: all commits signed off"
+
+  test:
+    image: python:3.11-bookworm
+    commands:
+      - |
+        if [ ! -f pyproject.toml ]; then
+          echo "SKIPPED: no pyproject.toml yet (package skeleton lands in Phase 2)."
+          echo "This step will run the full suite with coverage once it exists."
+          exit 0
+        fi
+        pip install -e ".[dev]"
+        pytest -n auto --cov --cov-fail-under=100
+
+  package:
+    image: python:3.11-bookworm
+    commands:
+      - |
+        if [ ! -f pyproject.toml ]; then
+          echo "SKIPPED: no pyproject.toml yet (package skeleton lands in Phase 2)."
+          echo "This step will build sdist+wheel, twine-check them, install the"
+          echo "wheel into a fresh venv, run the suite there, and smoke the"
+          echo "console script once it exists."
+          exit 0
+        fi
+        pip install --quiet build twine
+        python -m build
+        twine check dist/*
+        python -m venv /tmp/fresh-venv
+        /tmp/fresh-venv/bin/pip install --quiet dist/*.whl
+        /tmp/fresh-venv/bin/pip install --quiet pytest pytest-xdist hypothesis
+        # Run the suite against the INSTALLED wheel, not the source tree:
+        # catches missing package-data, broken entry points, absent deps.
+        /tmp/fresh-venv/bin/python -m pytest tests/ -n auto
+        # Console-script smoke — the artifact works, not just the tests.
+        /tmp/fresh-venv/bin/exploradora --help

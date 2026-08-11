@@ -1,0 +1,102 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exploradora"
+# Pre-release marker on purpose: 0.1.0 is the first PyPI release and is minted
+# by the release workflow (AGENTS.md), never carried silently in dev.
+version = "0.1.0"
+description = "Local-first explorer for verifiable model adapters (pre-alpha: package skeleton; no features yet)"
+readme = "README.md"
+requires-python = ">=3.10"
+# The repository is dual-licensed by directory: src/exploradora/core/ is
+# Apache-2.0, everything else AGPL-3.0-or-later. The distribution therefore
+# carries both. See LICENSING.md for the boundary and the rationale.
+license = "AGPL-3.0-or-later AND Apache-2.0"
+license-files = ["LICENSE", "LICENSE-APACHE", "LICENSING.md"]
+authors = [{ name = "iterabloom" }]
+keywords = ["lora", "adapters", "verification", "tui", "local-first"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Each dependency carries a written justification (AGENTS.md: minimal deps).
+# - textual: the TUI is the product face of v0.1 (brief item 3) and the sole
+#   runtime dependency. rich arrives only transitively and is never imported
+#   directly. safetensors is deliberately ABSENT: v0.1 hashes weights bytes
+#   and never parses tensors — even the demo fixture writes its (structurally
+#   valid) safetensors file with stdlib struct+json.
+dependencies = ["textual>=8.2,<9"]
+
+[project.urls]
+Repository = "https://github.com/iterabloom/exploradora"
+
+[project.scripts]
+exploradora = "exploradora.cli:main"
+
+[project.optional-dependencies]
+# Test/lint toolchain. hypothesis is load-bearing, not optional polish:
+# AGENTS.md mandates property tests for canonical-serialization round-trips,
+# schema invariants, and hash stability.
+dev = [
+  "pytest",
+  "pytest-cov",
+  "pytest-xdist",
+  "hypothesis",
+  # Executes the interop artifact (manifest.schema.json) against the same
+  # valid/invalid corpus the Python validator is tested on; the CI package
+  # step's fresh venv omits it, exercising the skip path.
+  "jsonschema",
+  "ruff",
+  "bandit",
+  "yamllint",
+  # Release tooling (scripts/release-check): build makes the artifacts,
+  # twine only CHECKS metadata here — uploads are human-only with
+  # human-held tokens (AGENTS.md §Security Boundaries).
+  "build",
+  "twine",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# The JSON Schema is the schema layer's interoperability artifact; shipping it
+# in the wheel is load-bearing (manifest.schema() reads it via importlib.resources,
+# and the CI package step runs the suite against the installed wheel).
+"exploradora.core" = ["*.schema.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["exploradora"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# Defaults (E4/E7/E9/F) plus: I (import order), B (bugbear), S (security —
+# ruff's bandit-derived rules, so the linter and bandit agree), UP (pyupgrade).
+select = ["E4", "E7", "E9", "F", "I", "B", "S", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# assert is the assertion mechanism in pytest; S101 is a non-finding there.
+"tests/*" = ["S101"]
+
+[tool.bandit]
+# Present so CI's `bandit -c pyproject.toml` finds a config section.
+# No skips: findings are fixed or explicitly justified inline, never blanket-silenced.
+exclude_dirs = [".venv", "build", "dist"]

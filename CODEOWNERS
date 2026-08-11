@@ -1,0 +1,44 @@
+# CODEOWNERS — governance-file review gate.
+#
+# Every path below requires approval from @josh-iterabloom (the human maintainer).
+# The agent account (jgstern-agent) must NOT self-approve or self-merge PRs that
+# touch these files (AGENTS.md §Governance Files). This file documents that
+# authoritative list; the gate is BEHAVIORAL, not forge-enforced. Branch
+# protection deliberately does NOT enable "require review from Code Owners" —
+# that setting forces a review on every PR, which would defeat auto-pr's
+# green-CI auto-merge (decision: maintainer, 2026-08-10). Approval for
+# governance PRs is a maintainer go-ahead on the PR thread (or in-session
+# during pre-remote bootstrap), not a formal GitHub review.
+#
+# SYNTAX: GitHub reads this as gitignore-style globs (leading "/" anchors to the
+# repo root; a trailing "/" matches a directory and everything under it).
+
+# --- Agent-policy & governance config --------------------------------------
+/AGENTS.md                     @josh-iterabloom
+/ALLOWED_WEBSITES.md           @josh-iterabloom
+/CODEOWNERS                    @josh-iterabloom
+
+# --- Licensing -------------------------------------------------------------
+/LICENSE                       @josh-iterabloom
+/LICENSE-APACHE                @josh-iterabloom
+/LICENSING.md                  @josh-iterabloom
+/src/exploradora/core/LICENSE  @josh-iterabloom
+
+# --- Git hooks, installation & agent-policy validation ---------------------
+/.githooks/                    @josh-iterabloom
+/.agent/                       @josh-iterabloom
+/scripts/install-hooks         @josh-iterabloom
+/scripts/validate-agents.sh    @josh-iterabloom
+/scripts/license-headers       @josh-iterabloom
+
+# --- Forge-automation scripts (CI / PR) ------------------------------------
+/scripts/auto-pr               @josh-iterabloom
+/scripts/merge-pr              @josh-iterabloom
+/scripts/contribute            @josh-iterabloom
+/scripts/ci-debug              @josh-iterabloom
+/scripts/list-my-prs           @josh-iterabloom
+/scripts/lib/forgejo-api.sh    @josh-iterabloom
+/scripts/lib/github-api.sh     @josh-iterabloom
+
+# --- CI pipeline definitions -----------------------------------------------
+/.woodpecker/                  @josh-iterabloom

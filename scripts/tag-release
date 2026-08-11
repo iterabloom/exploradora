@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Create and push a signed release tag — the HUMAN-run step that fires the
+# release workflow (.github/workflows/release.yml).
+#
+# Usage: ./scripts/tag-release VERSION [--dry-run]
+#
+# ORDERING NOTE (changed when publishing was automated): the tag now CAUSES
+# the PyPI upload rather than following it. The old sequence — upload by hand,
+# then tag to record what you uploaded — is gone. The sequence is now:
+#
+#   1. Merge the dev -> main release PR.
+#   2. Rehearse: run the Release workflow via workflow_dispatch with
+#      dry_run=true. It builds and uploads to TestPyPI. Verify the
+#      install-from-index in a fresh venv. (AGENTS.md: not skippable.)
+#   3. Run this script. The tag push publishes to PyPI and cuts a GitHub
+#      Release. There is no undo — PyPI does not allow re-uploading a version.
+#
+# Prerequisites:
+#   - The dev -> main PR is merged and main is up to date
+#   - A signing key is configured (see Step 4), or you accept an unsigned tag
+#   - PYPI_TOKEN exists in the repository secrets (the workflow fails loudly
+#     without it rather than cutting a Release for an unpublished version)
+#
+# Adapted from hypergumbo's tag-release, reduced to the single-package case.
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+
+DRY_RUN=false
+VERSION=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dry-run) DRY_RUN=true; shift ;;
+        -h|--help)
+            echo "Usage: $0 VERSION [--dry-run]"
+            echo ""
+            echo "Creates and pushes a signed release tag, firing the release workflow."
+            echo ""
+            echo "  VERSION      Version to tag (e.g., 0.1.0)"
+            echo "  --dry-run    Show what would happen without making changes"
+            echo ""
+            echo "Human-run, after the release PR is merged AND the TestPyPI"
+            echo "rehearsal (workflow_dispatch, dry_run=true) has passed."
+            exit 0 ;;
+        -*) echo "Unknown option: $1" >&2; exit 1 ;;
+        *)  VERSION="$1"; shift ;;
+    esac
+done
+
+[[ -n "$VERSION" ]] || { echo -e "${RED}Error: VERSION is required${NC}" >&2; echo "Usage: $0 VERSION [--dry-run]" >&2; exit 1; }
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?$ ]] \
+    || { echo -e "${RED}Error: invalid version format: $VERSION${NC}" >&2; exit 1; }
+
+TAG="v$VERSION"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+
+FORGE_WEB="https://github.com/iterabloom/exploradora"
+
+echo "╔════════════════════════════════════════╗"
+echo "║        Tag Release $TAG"
+echo "╚════════════════════════════════════════╝"
+echo ""
+if $DRY_RUN; then
+    echo -e "${YELLOW}[DRY RUN MODE — no changes will be made]${NC}"
+    echo ""
+fi
+
+run() { if $DRY_RUN; then echo -e "${BLUE}[dry-run]${NC} $*"; else "$@"; fi; }
+
+# ─────────────────────────────────────────────────────────────
+echo "━━━ Step 1: Switch to main ━━━"
+# ─────────────────────────────────────────────────────────────
+[[ -z "$(git status --porcelain)" ]] \
+    || { echo -e "${RED}Error: uncommitted changes${NC}" >&2; git status --short; exit 1; }
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+    echo "Switching from $CURRENT_BRANCH to main..."
+    run git checkout main
+fi
+run git fetch origin main
+run git pull --ff-only origin main
+if ! $DRY_RUN; then
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
+        || { echo -e "${RED}Error: main is not in sync with origin/main${NC}" >&2; exit 1; }
+fi
+echo -e "${GREEN}✓${NC} on main, in sync with origin"
+
+# ─────────────────────────────────────────────────────────────
+echo ""
+echo "━━━ Step 2: Verify version ━━━"
+# ─────────────────────────────────────────────────────────────
+PYVER=$(grep '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+if [[ "$PYVER" != "$VERSION" ]]; then
+    echo -e "${RED}Error: version mismatch${NC}" >&2
+    echo "  Expected (argument):     $VERSION" >&2
+    echo "  Found in pyproject.toml: $PYVER" >&2
+    echo "" >&2
+    echo "  Is the dev -> main release PR merged?" >&2
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} pyproject.toml version matches: $VERSION"
+
+if grep -q "## \[$VERSION\]" CHANGELOG.md; then
+    echo -e "${GREEN}✓${NC} CHANGELOG.md has a [$VERSION] section"
+else
+    echo -e "${YELLOW}!${NC} Warning: CHANGELOG.md has no [$VERSION] section"
+    echo "  The GitHub Release notes will fall back to a stub."
+fi
+
+# The failure this guard exists for: tag-release was ported to this repo before
+# .github/workflows/release.yml existed, so pushing a tag did nothing at all.
+if [[ -f .github/workflows/release.yml ]]; then
+    echo -e "${GREEN}✓${NC} release workflow present — the tag has a consumer"
+else
+    echo -e "${RED}Error: .github/workflows/release.yml is missing on main${NC}" >&2
+    echo "  Pushing this tag would publish nothing and cut no Release." >&2
+    exit 1
+fi
+
+# ─────────────────────────────────────────────────────────────
+echo ""
+echo "━━━ Step 3: Check for an existing tag ━━━"
+# ─────────────────────────────────────────────────────────────
+if git rev-parse "$TAG" >/dev/null 2>&1; then
+    echo -e "${YELLOW}Warning: tag $TAG already exists${NC}"
+    echo ""
+    echo -e "${YELLOW}Note:${NC} if a previous run already published $VERSION to PyPI,"
+    echo "re-tagging will NOT republish it (PyPI forbids version reuse; the"
+    echo "workflow passes --skip-existing). It will re-cut the GitHub Release."
+    echo ""
+    read -p "Delete and recreate the tag? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        run git tag -d "$TAG"
+        run git push origin ":refs/tags/$TAG" || true
+        echo -e "${GREEN}✓${NC} deleted existing tag"
+    else
+        echo "Aborting."
+        exit 1
+    fi
+else
+    echo -e "${GREEN}✓${NC} tag $TAG is free"
+fi
+
+# ─────────────────────────────────────────────────────────────
+echo ""
+echo "━━━ Step 4: Create the signed tag ━━━"
+# ─────────────────────────────────────────────────────────────
+# Signing-key detection, in precedence order:
+#   1. $GPG_KEY_ID          — explicit, wins over config
+#   2. git config user.signingkey — honors gpg.format, so an SSH signing key
+#                                   configured this way works here too
+# With neither, `git tag -s` would die on a raw gpg error ("failed to write
+# commit object" / "no secret key"), which reads as a broken script rather
+# than an unconfigured machine. So: detect, explain, and offer the honest
+# fallback instead of failing opaquely.
+GPG_KEY="${GPG_KEY_ID:-}"
+CONFIGURED_KEY="$(git config --get user.signingkey 2>/dev/null || true)"
+SIGN_FORMAT="$(git config --get gpg.format 2>/dev/null || echo openpgp)"
+
+if [[ -n "$GPG_KEY" ]]; then
+    echo "Signing with GPG_KEY_ID=$GPG_KEY (format: $SIGN_FORMAT)"
+    run git tag -s -u "$GPG_KEY" "$TAG" -m "exploradora $VERSION"
+    echo -e "${GREEN}✓${NC} created signed tag: $TAG"
+elif [[ -n "$CONFIGURED_KEY" ]]; then
+    echo "Signing with git config user.signingkey=$CONFIGURED_KEY (format: $SIGN_FORMAT)"
+    run git tag -s "$TAG" -m "exploradora $VERSION"
+    echo -e "${GREEN}✓${NC} created signed tag: $TAG"
+else
+    echo -e "${YELLOW}Warning: no signing key configured${NC}"
+    echo ""
+    echo "  This machine has neither GPG_KEY_ID nor git config user.signingkey."
+    echo ""
+    echo "  Options:"
+    echo "    1. Configure GPG:  git config --global user.signingkey YOUR_KEY_ID"
+    echo "    2. Set the env var: GPG_KEY_ID=YOUR_KEY_ID ./scripts/tag-release $VERSION"
+    echo "    3. Create an unsigned annotated tag (the release is then"
+    echo "       unattributable — acceptable for a rehearsal, not for a"
+    echo "       release you want anyone to trust)."
+    echo ""
+    read -p "Create an UNSIGNED tag anyway? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        run git tag -a "$TAG" -m "exploradora $VERSION"
+        echo -e "${YELLOW}!${NC} created UNSIGNED tag: $TAG"
+    else
+        echo "Aborting. Configure a signing key and re-run."
+        exit 1
+    fi
+fi
+
+# ─────────────────────────────────────────────────────────────
+echo ""
+echo "━━━ Step 5: Push the tag (this publishes) ━━━"
+# ─────────────────────────────────────────────────────────────
+if ! $DRY_RUN; then
+    echo -e "${YELLOW}This push uploads $VERSION to PyPI and cuts a GitHub Release.${NC}"
+    echo -e "${YELLOW}PyPI does not allow re-uploading a version. There is no undo.${NC}"
+    echo ""
+    read -p "Push $TAG to origin? [y/N] " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]] || { echo "Aborting. Local tag kept; delete with: git tag -d $TAG"; exit 1; }
+fi
+run git push origin "$TAG"
+echo -e "${GREEN}✓${NC} pushed tag: $TAG"
+
+echo ""
+echo "╔════════════════════════════════════════════════════════════╗"
+echo -e "║  ${GREEN}Release $TAG triggered${NC}"
+echo "╚════════════════════════════════════════════════════════════╝"
+echo ""
+echo "Monitor:  $FORGE_WEB/actions"
+echo ""
+echo "Then verify:"
+echo "  - PyPI:    https://pypi.org/project/exploradora/$VERSION/"
+echo "  - Release: $FORGE_WEB/releases/tag/$TAG"
+echo "  - Install: pip install exploradora==$VERSION   (fresh venv)"
