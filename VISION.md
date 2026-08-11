@@ -117,10 +117,18 @@ test, not as achieved features:
 4. **Composition improves with experience** — a network that only
    accumulates skills is a library; it becomes frontier-like only if
    composition itself is learned. *Status: routing + verify works today on
-   synthetic substrates; static weight merging is winner-take-all at greedy
-   decode; a learned parents→merged weights map was falsified and priced
-   out. "Learned composition" therefore means a learned search policy over
-   candidates a verifier adjudicates — never a learned weight map.*
+   synthetic substrates, and it is the floor that survived measurement, not
+   the destination — verification costs real compute per candidate, so a
+   purely route-and-verify network is plausibly too slow to be practical at
+   scale. The learned weight-space route remains a major open research
+   direction: static merging is winner-take-all at greedy decode, yet both
+   skills stay present in the merged weights and reweighting exposes bands
+   where both express — the barrier looks like decode expression, not
+   capacity. One specific learned form (predicting a merged adapter from
+   its parents, at family grain) was falsified and priced out in a measured
+   attempt; the broader program's evidence is mixed — it doesn't work yet,
+   and it doesn't not work. Near-term shipping follows what is verified:
+   routing first, learned composition as it earns its way in.*
 5. **Single-skill minting from wild text** — that contest-free corpora
    within a tunable neighborhood can teach clean single skills cheaply.
    *Status: partially supported synthetically; external validity untested —
