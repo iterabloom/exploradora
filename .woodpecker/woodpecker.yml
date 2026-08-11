@@ -19,6 +19,17 @@ when:
   - event: push
     branch: [dev, main]
 
+# Full clone (mirrors hypergumbo's battle-tested config): the dco step's
+# `git merge-base origin/$CI_COMMIT_TARGET_BRANCH HEAD` needs the fork-point
+# commit, which a shallow/partial clone truncates away — merge-base then
+# exits 1 and set -e kills the step (observed live on this repo's first
+# pipeline, PR #2). The repo is tiny, so a complete clone costs nothing.
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      partial: false
+
 steps:
   lint:
     image: python:3.11-bookworm
@@ -41,7 +52,11 @@ steps:
     when:
       - event: pull_request
     commands:
-      - git fetch origin "$CI_COMMIT_TARGET_BRANCH"
+      # --unshallow backstop (no-op on the full clone above; guards against a
+      # server-side clone override reintroducing shallowness)
+      - |
+        git fetch --unshallow origin "$CI_COMMIT_TARGET_BRANCH" 2>/dev/null \
+          || git fetch origin "$CI_COMMIT_TARGET_BRANCH"
       - |
         base=$(git merge-base "origin/$CI_COMMIT_TARGET_BRANCH" HEAD)
         bad=""
