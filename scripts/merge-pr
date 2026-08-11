@@ -229,11 +229,11 @@ if [[ -z "$PR_NUM" ]]; then
 fi
 
 # ------------------------------------------------------------------
-# Validate credentials
+# Validate credentials (backend-aware, C9)
 # ------------------------------------------------------------------
-TOKEN="${FORGEJO_TOKEN:-}"
-if [[ -z "$TOKEN" ]]; then
-	echo "Error: FORGEJO_TOKEN not set. Source .env or set FORGEJO_TOKEN."
+resolve_forge_token
+if [[ -z "${FORGE_TOKEN:-}" ]]; then
+	echo "Error: no forge credential. Set EXPL_GITHUB_TOKEN (github backend) or FORGEJO_TOKEN in .env."
 	exit 1
 fi
 
