@@ -64,7 +64,6 @@ done
 # Validate environment
 # ------------------------------------------------------------------
 USER="${FORGEJO_USER:-}"
-TOKEN="${FORGEJO_TOKEN:-}"
 
 if [[ -z "$USER" ]]; then
     echo -e "${RED}Error: FORGEJO_USER not set${NC}"
@@ -72,11 +71,9 @@ if [[ -z "$USER" ]]; then
     exit 1
 fi
 
-if [[ -z "$TOKEN" ]]; then
-    echo -e "${RED}Error: FORGEJO_TOKEN not set${NC}"
-    echo "Set it in .env or export FORGEJO_TOKEN=your-token"
-    exit 1
-fi
+# TOKEN is resolved AFTER upstream-forge detection below (backend-aware, C9):
+# the credential depends on which forge the UPSTREAM remote points at, which
+# isn't known until detect_forge_backend "$UPSTREAM_URL" runs.
 
 BRANCH="$(git branch --show-current)"
 if [[ "$BRANCH" == "main" || "$BRANCH" == "dev" ]]; then
@@ -120,6 +117,16 @@ LOCAL_SHA="$(git rev-parse HEAD)"
 # Forgejo → curl/api_post. Dormant while codeberg is upstream (byte-identical
 # api base + /pulls/ web path for a codeberg upstream).
 detect_forge_backend "$UPSTREAM_URL"
+
+# Backend-aware credential (C9), resolved now that the upstream forge is known.
+resolve_forge_token
+TOKEN="${FORGE_TOKEN:-}"
+if [[ -z "$TOKEN" ]]; then
+    echo -e "${RED}Error: no forge credential${NC}"
+    echo "Set EXPL_GITHUB_TOKEN (github upstream) or FORGEJO_TOKEN in .env"
+    exit 1
+fi
+
 FORK_OWNER="${FORK_SLUG%%/*}"
 if [[ "${FORGE_BACKEND:-forgejo}" == "github" ]]; then
     UPSTREAM_API_BASE="https://api.github.com/repos/$UPSTREAM_SLUG"

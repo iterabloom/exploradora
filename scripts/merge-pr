@@ -86,10 +86,10 @@ cmd_close() {
 		return 1
 	fi
 
-	# Validate credentials
-	local token="${FORGEJO_TOKEN:-}"
-	if [[ -z "$token" ]]; then
-		echo "Error: FORGEJO_TOKEN not set. Source .env or set FORGEJO_TOKEN."
+	# Validate credentials (backend-aware, C9)
+	resolve_forge_token
+	if [[ -z "${FORGE_TOKEN:-}" ]]; then
+		echo "Error: no forge credential. Set EXPL_GITHUB_TOKEN (github backend) or FORGEJO_TOKEN in .env."
 		return 1
 	fi
 
