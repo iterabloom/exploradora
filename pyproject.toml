@@ -55,6 +55,11 @@ dev = [
   "ruff",
   "bandit",
   "yamllint",
+  # Release tooling (scripts/release-check): build makes the artifacts,
+  # twine only CHECKS metadata here — uploads are human-only with
+  # human-held tokens (AGENTS.md §Security Boundaries).
+  "build",
+  "twine",
 ]
 
 [tool.setuptools.packages.find]

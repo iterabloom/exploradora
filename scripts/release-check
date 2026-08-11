@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Validate release readiness. Runs everything that can be checked WITHOUT an
+# index token; uploading is a human action (AGENTS.md §Security Boundaries)
+# and this script never attempts it.
+#
+# Checks, in order:
+#   1. sdist + wheel build          (python -m build)
+#   2. metadata                     (twine check)
+#   3. fresh-venv wheel install     (the artifact, not the checkout)
+#   4. test suite against the installed wheel (no coverage here — coverage is
+#      the CI gate on the checkout; this asks "does the WHEEL work")
+#   5. console-script smoke: --version matches pyproject; a scripted
+#      init/verify round-trip passes; the demo's tampered adapter FAILS
+#      verification (exit 1) — the honest-failure path must survive packaging
+#
+# Usage: ./scripts/release-check
+#
+# Adapted from hypergumbo's release-check for the single-package layout.
+set -euo pipefail
+
+GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
+say()  { echo -e "${GREEN}✓${NC} $*"; }
+fail() { echo -e "${RED}✗${NC} $*" >&2; exit 1; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+
+PY="$PROJECT_ROOT/.venv/bin/python"
+[[ -x "$PY" ]] || PY=python3
+
+VERSION=$(grep '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+echo "release-check for version $VERSION"
+echo ""
+
+echo "━━━ 1/5: build sdist + wheel ━━━"
+rm -rf dist/
+"$PY" -m build >/dev/null || fail "python -m build failed"
+ls -1 dist/
+say "built $(ls dist/ | wc -l) artifacts"
+
+echo ""
+echo "━━━ 2/5: twine check ━━━"
+"$PY" -m twine check dist/* || fail "twine check failed"
+say "metadata passes twine check"
+
+echo ""
+echo "━━━ 3/5: fresh-venv wheel install ━━━"
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+"$PY" -m venv "$WORK/venv"
+VPIP="$WORK/venv/bin/pip"
+VPY="$WORK/venv/bin/python"
+"$VPIP" install --quiet dist/*.whl || fail "wheel install failed"
+say "wheel installs into a fresh venv"
+
+echo ""
+echo "━━━ 4/5: test suite against the installed wheel ━━━"
+"$VPIP" install --quiet pytest pytest-xdist hypothesis jsonschema
+( cd "$WORK" && "$VPY" -m pytest "$PROJECT_ROOT/tests" -q -n auto -p no:cacheprovider ) \
+    || fail "test suite failed against the installed wheel"
+say "test suite passes against the installed wheel"
+
+echo ""
+echo "━━━ 5/5: console-script smoke ━━━"
+EXPL="$WORK/venv/bin/exploradora"
+GOT=$("$EXPL" --version)
+[[ "$GOT" == "exploradora $VERSION" ]] \
+    || fail "--version says '$GOT', expected 'exploradora $VERSION'"
+say "--version reports $VERSION"
+
+"$VPY" - "$WORK" <<'EOF' || fail "demo fixture build failed"
+import sys
+from pathlib import Path
+from exploradora import demo
+demo.build_demo_library(Path(sys.argv[1]) / "demolib")
+EOF
+"$EXPL" verify "$WORK/demolib/demo-adapter" >/dev/null \
+    || fail "verify on the valid demo adapter should exit 0"
+if "$EXPL" verify "$WORK/demolib/tampered-adapter" >/dev/null; then
+    fail "verify on the tampered adapter should exit 1 — the honest-failure path is broken"
+fi
+say "init/verify round-trip: valid adapter passes, tampered adapter fails (as it must)"
+
+echo ""
+say "release-check passed for $VERSION — dist/ is ready; uploading is a HUMAN action"
