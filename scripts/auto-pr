@@ -2315,8 +2315,6 @@ gov_cleanup() {
 	load_env
 	detect_api_base
 
-	local token="${FORGEJO_TOKEN:-}"
-
 	_autopr_state_pr_num="$pr_num"
 
 	# Verify PR is actually merged
