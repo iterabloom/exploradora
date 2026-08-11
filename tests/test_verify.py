@@ -161,11 +161,11 @@ def test_cli_verify_failure_exits_one_and_names_the_failure(tmp_path, capsys):
     assert STATUS_FAILED in out and "not found" in out
 
 
-def test_cli_help_names_verify_and_only_verify_as_a_subcommand(capsys):
+def test_cli_help_names_verify_as_a_subcommand(capsys):
     parser = cli.build_parser()
     subactions = [a for a in parser._actions if a.__class__.__name__ == "_SubParsersAction"]
     assert len(subactions) == 1
-    assert sorted(subactions[0].choices) == ["verify"]  # implemented verbs only
+    assert "verify" in subactions[0].choices  # the full implemented-verb list is pinned in test_init.py
     with pytest.raises(SystemExit) as exc:
         cli.main(["--help"])
     assert exc.value.code == 0

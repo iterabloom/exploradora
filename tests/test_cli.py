@@ -64,7 +64,7 @@ def test_only_implemented_verbs_are_advertised(capsys):
     parser = cli.build_parser()
     subactions = [a for a in parser._actions if a.__class__.__name__ == "_SubParsersAction"]
     assert len(subactions) == 1
-    assert sorted(subactions[0].choices) == ["verify"]
+    assert sorted(subactions[0].choices) == ["init", "verify"]
     with pytest.raises(SystemExit):
         cli.main(["--help"])
     assert "under construction" in capsys.readouterr().out
