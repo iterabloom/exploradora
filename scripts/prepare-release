@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Prepare a release for human approval, stopping where human action begins.
+#
+# Usage: ./scripts/prepare-release VERSION [--dry-run] [--no-pr]
+#
+# What it does (the agent's half of the release workflow, AGENTS.md):
+#   1. Pre-flight: on dev, tree clean, no PR_PENDING, synced, tag free
+#   2. ./scripts/bump-version VERSION
+#   3. Rolls CHANGELOG.md ([Unreleased] -> [VERSION] - date)
+#   4. Branches release/vVERSION, commits (DCO sign-off)
+#   5. ./scripts/release-check (build, twine check, fresh-venv wheel + suite + smoke)
+#   6. ./scripts/auto-pr — merges the release commit to dev
+#   7. Opens the dev -> main PR via BASE_BRANCH=main auto-pr --gov (pushes,
+#      runs CI, does NOT merge — the human reviews and merges)
+#   8. Prints the handoff and STOPS. The TestPyPI rehearsal, the real upload,
+#      and ./scripts/tag-release are HUMAN actions; index tokens never touch
+#      the agent (AGENTS.md §Security Boundaries).
+#
+# All forge/CI interaction goes through auto-pr (the CI Interaction Policy);
+# this script never calls the API directly.
+# Adapted from hypergumbo's prepare-release: single package, GitHub + auto-pr
+# instead of Codeberg refs/for, and the dev->main leg uses --gov mode.
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+DRY_RUN=false
+NO_PR=false
+VERSION=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dry-run) DRY_RUN=true; shift ;;
+        --no-pr)   NO_PR=true; shift ;;
+        -h|--help)
+            sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        -*) echo "Unknown option: $1" >&2; exit 1 ;;
+        *)  VERSION="$1"; shift ;;
+    esac
+done
+
+[[ -n "$VERSION" ]] || { echo -e "${RED}Error: VERSION is required${NC}" >&2; exit 1; }
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?$ ]] \
+    || { echo -e "${RED}Error: invalid version format: $VERSION${NC}" >&2; exit 1; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+
+run() { if $DRY_RUN; then echo -e "${BLUE}[dry-run]${NC} $*"; else "$@"; fi; }
+
+echo "━━━ Step 1: Pre-flight ━━━"
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+[[ "$BRANCH" == "dev" ]] || { echo -e "${RED}Error: must be on dev (on '$BRANCH')${NC}" >&2; exit 1; }
+[[ ! -f .git/PR_PENDING ]] || { echo -e "${RED}Error: an auto-pr is in flight (PR_PENDING)${NC}" >&2; exit 1; }
+[[ -z "$(git status --porcelain)" ]] || { echo -e "${RED}Error: uncommitted changes${NC}" >&2; git status --short; exit 1; }
+run git fetch origin dev
+run git merge --ff-only origin/dev
+if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+    echo -e "${RED}Error: tag v$VERSION already exists${NC}" >&2; exit 1
+fi
+echo -e "${GREEN}✓${NC} on dev, clean, synced; tag v$VERSION is free"
+
+echo ""
+echo "━━━ Step 2: Bump version ━━━"
+run ./scripts/bump-version "$VERSION"
+
+echo ""
+echo "━━━ Step 3: Roll CHANGELOG ━━━"
+TODAY=$(date +%Y-%m-%d)
+if grep -q "## \[Unreleased\]" CHANGELOG.md; then
+    run sed -i "s/## \[Unreleased\]/## [Unreleased]\n\n## [$VERSION] - $TODAY/" CHANGELOG.md
+    echo -e "${GREEN}✓${NC} CHANGELOG.md: [Unreleased] -> [$VERSION] - $TODAY"
+else
+    echo -e "${RED}Error: CHANGELOG.md has no [Unreleased] section${NC}" >&2; exit 1
+fi
+
+echo ""
+echo "━━━ Step 4: Branch + commit ━━━"
+RELEASE_BRANCH="jgstern-agent/chore/release-v$VERSION"
+run git checkout -b "$RELEASE_BRANCH"
+run git add pyproject.toml CHANGELOG.md
+run git commit -s -m "chore: release $VERSION"
+
+echo ""
+echo "━━━ Step 5: release-check ━━━"
+if ! $DRY_RUN; then
+    ./scripts/release-check || {
+        echo -e "${RED}✗ release-check failed.${NC} Fix and 'git commit --amend', or reset:" >&2
+        echo "  git checkout dev && git branch -D $RELEASE_BRANCH" >&2
+        exit 1
+    }
+else
+    echo -e "${BLUE}[dry-run]${NC} ./scripts/release-check"
+fi
+
+echo ""
+echo "━━━ Step 6: Merge release commit to dev (auto-pr) ━━━"
+run ./scripts/auto-pr --title "chore: release $VERSION"
+
+echo ""
+echo "━━━ Step 7: Open dev -> main PR (--gov: CI runs, human merges) ━━━"
+if $NO_PR; then
+    echo -e "${YELLOW}skipped (--no-pr)${NC}"
+elif $DRY_RUN; then
+    echo -e "${BLUE}[dry-run]${NC} BASE_BRANCH=main ./scripts/auto-pr --gov"
+else
+    git checkout dev && git pull origin dev
+    git checkout -b "jgstern-agent/chore/release-v$VERSION-to-main"
+    BASE_BRANCH=main ./scripts/auto-pr --gov \
+        --title "Release v$VERSION" \
+        --description "Merge dev into main for the v$VERSION release. Reviewer checklist: version bumped, CHANGELOG rolled, CI green. After merging: TestPyPI rehearsal, real upload, ./scripts/tag-release $VERSION (all human-held)."
+fi
+
+echo ""
+echo -e "${CYAN}═══ HANDOFF TO HUMAN — the agent STOPS here ═══${NC}"
+echo ""
+echo "  1. Review + merge the 'Release v$VERSION' PR (dev -> main) on GitHub"
+echo "  2. Rehearse on TestPyPI (not skippable), from dist/ built by release-check:"
+echo "       twine upload --repository testpypi dist/*"
+echo "       pip install --index-url https://test.pypi.org/simple/ --no-deps exploradora  # fresh venv"
+echo "  3. Real upload:  twine upload dist/*"
+echo "  4. Tag (GPG-signed), after the upload succeeded:"
+echo "       ./scripts/tag-release $VERSION"
+echo ""
+echo "  Index tokens are human-held; the agent never uploads."

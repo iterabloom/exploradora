@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Bump the package version in pyproject.toml (the single source of version truth:
+# the runtime reads it back via importlib.metadata, so nothing else needs editing).
+#
+# Usage: ./scripts/bump-version VERSION        (e.g. 0.1.0)
+#
+# Adapted from hypergumbo's bump-version, reduced to the single-package case.
+set -euo pipefail
+
+VERSION="${1:-}"
+if [[ -z "$VERSION" ]]; then
+    echo "Usage: $0 VERSION (e.g. 0.1.0)" >&2
+    exit 1
+fi
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?$ ]]; then
+    echo "Error: invalid version format: $VERSION (expected MAJOR.MINOR.PATCH[suffix])" >&2
+    exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$(dirname "$SCRIPT_DIR")"
+
+MATCHES=$(grep -c '^version = "' pyproject.toml || true)
+if [[ "$MATCHES" -ne 1 ]]; then
+    echo "Error: expected exactly one 'version = \"...\"' line in pyproject.toml, found $MATCHES" >&2
+    exit 1
+fi
+
+CURRENT=$(grep '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+echo "version: $CURRENT -> $VERSION (pyproject.toml)"
