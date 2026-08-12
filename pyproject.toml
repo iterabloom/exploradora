@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "exploradora"
 # Pre-release marker on purpose: 0.1.0 is the first PyPI release and is minted
 # by the release workflow (AGENTS.md), never carried silently in dev.
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Local-first explorer for verifiable model adapters (pre-alpha: package skeleton; no features yet)"
 readme = "README.md"
 requires-python = ">=3.10"
