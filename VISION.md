@@ -106,8 +106,15 @@ test, not as achieved features:
    adapters that disagree rather than factor) has a detectable signature,
    making a cheap `check` possible. *Status: measured, and the result is
    partial — weak as a classifier, usable as a filter. Its primary use is
-   improving corpus quality by splitting contested corpora into cleaner
-   ones. Of that splitting pipeline: the localization gate is validated
+   decomposition, and the motive is legibility rather than hygiene: a
+   contested corpus is not defective — the evidence in each prompt says
+   which fix that example wants, so contestation is exactly what forces a
+   model to condition on evidence instead of shortcutting. What it costs
+   is that the resulting adapter's behaviour is *conditional*, so you
+   cannot tell what it does from its name or its skill list. Splitting a
+   contested corpus yields parts that can each be characterized on their
+   own and recombined, and keeps a corpus that would otherwise be
+   discarded. Of that splitting pipeline: the localization gate is validated
    out-of-sample; the splitter refuses harmful cuts; the stopping rule
    survives realistic (correlated) detector error only with a small fixed
    slack — a zero-tolerance rule is a knife edge; and under that same
