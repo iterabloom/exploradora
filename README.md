@@ -1,10 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 # exploradora
 
-**STATUS: pre-alpha — the v0.1 surface works end to end: the TUI
-(`exploradora` / `exploradora browse`), `verify`, `init`, and
-`exploradora demo`. Nothing is published to PyPI yet; the exchange, p2p,
-and claim replay are roadmap, not features.**
+**STATUS: pre-alpha — v0.1.0 is [on PyPI](https://pypi.org/project/exploradora/):
+a working local adapter-library explorer — the TUI (`exploradora` /
+`exploradora browse`), `verify`, `init`, and `exploradora demo`. The
+exchange, p2p, and claim replay are roadmap, not features.**
 
 A local-first terminal UI for exploring, verifying, and managing small model
 adapters — a package manager for *skills* instead of software, built so that
@@ -53,13 +53,18 @@ claim, and `agreement_relation` per attestation.
 
 ## Install and try it
 
-Not on PyPI yet — install from source:
+```sh
+pip install exploradora
+exploradora demo                    # the sample library, in the TUI
+```
+
+Or from source, for development:
 
 ```sh
 git clone https://github.com/iterabloom/exploradora
 cd exploradora
-python3 -m venv .venv && .venv/bin/pip install -e .
-.venv/bin/exploradora demo          # the sample library, in the TUI
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/exploradora demo
 ```
 
 Then make your own adapter explorable:
