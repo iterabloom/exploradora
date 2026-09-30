@@ -91,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"adapter version (default: {core_scaffold.DEFAULT_VERSION!r}, meaning unreleased)",
     )
     p_init.add_argument("--base-model", required=True, help="base model the adapter targets")
-    p_init.add_argument("--a0-seed", required=True, type=int, help="frozen A0 down-projection seed")
+    p_init.add_argument("--a0-seed", required=True, type=int, help="seed of the shared A0 down-projection the adapter descends from")
     p_init.add_argument("--rank", required=True, type=int, help="adapter rank")
     p_init.add_argument(
         "--parameterization", required=True, choices=core_manifest.PARAMETERIZATIONS,

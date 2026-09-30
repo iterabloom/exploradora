@@ -14,7 +14,7 @@ The long-term bet: a frontier-class AI system does not have to be one giant
 model in one datacenter. It can be a *network* — a shared small base model
 (a few GB, runnable on consumer hardware) plus thousands of community-minted
 LoRA-family adapters, each teaching one skill, each carrying **checkable
-claims** instead of marketing. The base model is the runtime, a frozen
+claims** instead of marketing. The base model is the runtime, a
 shared adapter frame is the ABI, adapters are the packages, and
 *verification* — not central curation — is what makes a stranger's adapter
 trustworthy.
@@ -96,12 +96,19 @@ test, not as achieved features:
    owed, so an attestation must state which agreement relation it asserts —
    the manifest schema's `agreement_relation` field exists for exactly
    this, and the honest default is verdict-level agreement.*
-2. **The frozen-frame ABI** — all adapters share one frozen down-projection,
-   so an adapter *is* its coordinates: comparable, mergeable,
-   geometry-readable. *Status: the frame-tag compatibility system is
-   designed into the schema now (including the load-bearing, one-way
-   `parameterization` field: LoRA converts to DoRA exactly, DoRA has no
-   exact low-rank inverse); no resolver exists yet.*
+2. **The shared-frame ABI** — all adapters descend from one common
+   down-projection (A₀), train it from that start and ship both factors,
+   so adapters of one ancestor are comparable, mergeable and
+   geometry-readable through their products. *Status: shared-A, not
+   frozen-A₀ / B-only, by maintainer ruling 2026-09-29 — the research
+   record behind this project reads the shared arm above the frozen one
+   at matched fit, and every composition result it holds was read on
+   shared-A adapters. The frame-tag compatibility system is designed into
+   the schema now: the A₀ seed names the ancestor, a frozen-A adapter is
+   the zero-drift case of the same frame and needs no extra field, and the
+   load-bearing, one-way `parameterization` field is there (LoRA converts
+   to DoRA exactly, DoRA has no exact low-rank inverse); no resolver
+   exists yet.*
 3. **The contest fingerprint** — that *contestation* (two corpora or
    adapters that disagree rather than factor) has a detectable signature,
    making a cheap `check` possible. *Status: measured, and the result is
